@@ -1,0 +1,85 @@
+name: luxmed-bot
+
+services:
+  luxmed-bot:
+    image: ghcr.io/piteriuz/luxmed-bot:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      SECURITY_SECRET: change-me-to-a-long-random-string
+      TELEGRAM_TOKEN: paste-your-telegram-bot-token-here
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/lbs
+        target: /lbs
+    depends_on:
+      - database
+    x-casaos:
+      envs:
+        - container: TELEGRAM_TOKEN
+          description:
+            en_us: Telegram bot token from BotFather.
+            pl_pl: Token bota Telegram z BotFather.
+        - container: SECURITY_SECRET
+          description:
+            en_us: Long random secret used by the bot.
+            pl_pl: Dlugi losowy sekret uzywany przez bota.
+      volumes:
+        - container: /lbs
+          description:
+            en_us: Bot persistent data.
+            pl_pl: Dane trwale bota.
+      container_name: luxmed-bot
+
+  database:
+    image: postgres:10.6
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    environment:
+      POSTGRES_USER: lbs
+      POSTGRES_PASSWORD: lsb123
+      POSTGRES_DB: lbs
+      TZ: Europe/Warsaw
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/postgres
+        target: /var/lib/postgresql/data
+    x-casaos:
+      volumes:
+        - container: /var/lib/postgresql/data
+          description:
+            en_us: PostgreSQL data.
+            pl_pl: Dane PostgreSQL.
+      container_name: luxmed-bot-database
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: luxmed-bot
+  author: Piteriuz
+  category: Utilities
+  description:
+    en_us: Unofficial Telegram bot for monitoring and booking LUX MED appointments.
+    pl_pl: Nieoficjalny bot Telegram do monitorowania i rezerwowania wizyt LUX MED.
+  developer: dyrkin
+  icon: https://cdn.jsdelivr.net/gh/Piteriuz/luxmed-bot@master/screenshot.png
+  tagline:
+    en_us: Telegram appointment monitor for LUX MED.
+    pl_pl: Telegramowy monitor wizyt LUX MED.
+  thumbnail: https://cdn.jsdelivr.net/gh/Piteriuz/luxmed-bot@master/screenshot.png
+  tips:
+    before_install:
+      en_us: Replace TELEGRAM_TOKEN and SECURITY_SECRET before starting the app.
+      pl_pl: Przed uruchomieniem zmien TELEGRAM_TOKEN i SECURITY_SECRET.
+  title:
+    en_us: Luxmed Bot
+    pl_pl: Luxmed Bot
