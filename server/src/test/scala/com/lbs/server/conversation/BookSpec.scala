@@ -191,7 +191,18 @@ class BookSpec extends AkkaTestKit {
         val from = LocalDateTime.now().plusDays(1)
         val to = from.plusDays(7)
         book.start()
-        selectStaticData(book, bot)
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(1L, "Wroclaw")
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(100L, "GP Consultation")
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(10L, "Swobodna Clinic")
+        awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
+        book ! callbackCmd(Tags.Continue)
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(50L, "Dr Smith")
+        dp.expectMsg(DatePicker.DateFromMode)
+        dp.expectMsgType[LocalDateTime]
         book ! DateRange(from, to)
         awaitAssert(verify(bot, atLeastOnce()).sendMessage(
           any[MessageSource](),
