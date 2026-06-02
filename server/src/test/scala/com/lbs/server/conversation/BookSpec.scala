@@ -193,8 +193,13 @@ class BookSpec extends AkkaTestKit {
         book.start()
         selectStaticData(book, bot)
         book ! DateRange(from, to)
+        tp.expectMsg(TimePicker.TimeFromMode)
+        tp.expectMsgType[LocalTime]
         book ! LocalTime.of(8, 0)
+        tp.expectMsg(TimePicker.TimeToMode)
+        tp.expectMsgType[LocalTime]
         book ! LocalTime.of(20, 0)
+        awaitAssert(verify(dataService, atLeastOnce()).storeAppointment(any(), any()))
         book ! callbackCmd(Tags.FindTerms)
         awaitAssert(verify(apiService, times(1)).getAvailableTerms(
           anyLong(), anyLong(), any(), anyLong(), any(), any(), any(), any(), any(), anyLong()
