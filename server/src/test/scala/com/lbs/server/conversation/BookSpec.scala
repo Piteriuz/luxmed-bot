@@ -2,7 +2,7 @@ package com.lbs.server.conversation
 
 import com.lbs.api.json.model.*
 import com.lbs.bot.Bot
-import com.lbs.bot.model.{Command, Message, MessageSource, TelegramMessageSourceSystem}
+import com.lbs.bot.model.{Command, InlineKeyboard, Message, MessageSource, TelegramMessageSourceSystem}
 import com.lbs.server.conversation.Book.Tags
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.NoItemsFound
@@ -54,10 +54,20 @@ class BookSpec extends AkkaTestKit {
   private def callbackCmd(tag: String) =
     Command(source, Message("1", Some(tag)), Some(tag))
 
-  private def selectStaticData(book: Book): Unit = {
+  private def awaitClinicContinuationPrompt(bot: Bot, selectedClinic: String): Unit =
+    awaitAssert(
+      verify(bot, atLeastOnce()).sendMessage(
+        any[MessageSource](),
+        contains(selectedClinic),
+        any[Option[InlineKeyboard]]()
+      )
+    )
+
+  private def selectStaticData(book: Book, bot: Bot): Unit = {
     book ! IdName(1L, "Wroclaw")
     book ! IdName(100L, "GP Consultation")
     book ! IdName(10L, "Swobodna Clinic")
+    awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
     book ! callbackCmd(Tags.Continue)
     book ! IdName(50L, "Dr Smith")
   }
@@ -134,10 +144,11 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService)
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -151,10 +162,11 @@ class BookSpec extends AkkaTestKit {
         val sp = ConversationTestProbe[StaticData]()
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val dataService = makeDataService
+        val bot         = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
-        val book = makeBook(dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.ModifyDate)
         val base = LocalDateTime.now().plusDays(3)
@@ -172,12 +184,13 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService)
         when(apiService.deleteTemporaryReservation(anyLong(), any(), anyLong()))
           .thenReturn(Right(()))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -196,13 +209,14 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(anyLong())).thenReturn(None)
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
@@ -219,12 +233,13 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(anyLong())).thenReturn(None)
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
@@ -247,13 +262,14 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService,
           lockResponse = sampleLockResponse(changeTermAvailable = true))
         when(apiService.reservationChangeTerm(anyLong(), any(), any()))
           .thenReturn(Right(sampleConfirmResponse))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -268,11 +284,12 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService,
           lockResponse = sampleLockResponse(changeTermAvailable = true))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -294,14 +311,15 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(userId.userId))
           .thenReturn(Some(Settings(userId.userId, 0, 0, alwaysAskOffset = true)))
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
@@ -321,14 +339,15 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(userId.userId))
           .thenReturn(Some(Settings(userId.userId, 0, 0, alwaysAskOffset = true)))
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
@@ -347,17 +366,20 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(anyLong())).thenReturn(None)
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
         book ! IdName(1L, "Wroclaw")
         book ! IdName(100L, "GP Consultation")
         book ! IdName(10L, "Swobodna Clinic")
+        awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
         book ! callbackCmd(Tags.AddAnotherClinic)
         book ! IdName(11L, "Legnicka Clinic")
+        awaitClinicContinuationPrompt(bot, "Legnicka Clinic")
         book ! callbackCmd(Tags.Continue)
         book ! IdName(50L, "Dr Smith")
         selectDates(book)
