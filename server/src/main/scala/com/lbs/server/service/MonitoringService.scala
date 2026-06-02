@@ -85,18 +85,8 @@ class MonitoringService extends StrictLogging {
           doctorId = monitoring.doctorId
         )
       } else {
-        apiService.getAvailableTerms(
-          monitoring.accountId,
-          monitoring.cityId,
-          monitoring.clinicId,
-          monitoring.serviceId,
-          monitoring.doctorId,
-          dateFrom,
-          monitoring.dateTo.toLocalDateTime,
-          timeFrom = monitoring.timeFrom,
-          timeTo = monitoring.timeTo
-        )
-      }
+        getAvailableTerms(monitoring, dateFrom)
+      }.map(filterExcludedDates(_, monitoring))
     termsEither match {
       case Right(terms) =>
         if (terms.nonEmpty) {
@@ -125,6 +115,28 @@ class MonitoringService extends StrictLogging {
     val nowWithOffset = LocalDateTime.now().plusHours(offset)
     if (date.isBefore(nowWithOffset)) nowWithOffset else date
   }
+
+  private def getAvailableTerms(monitoring: Monitoring, dateFrom: LocalDateTime): Either[Throwable, List[TermExt]] = {
+    monitoring.clinicOptions.foldLeft[Either[Throwable, List[TermExt]]](Right(Nil)) { (acc, clinicId) =>
+      for {
+        terms <- acc
+        next <- apiService.getAvailableTerms(
+          monitoring.accountId,
+          monitoring.cityId,
+          clinicId,
+          monitoring.serviceId,
+          monitoring.doctorId,
+          dateFrom,
+          monitoring.dateTo.toLocalDateTime,
+          timeFrom = monitoring.timeFrom,
+          timeTo = monitoring.timeTo
+        )
+      } yield terms ++ next
+    }.map(_.sortBy(_.term.dateTimeFrom.get.toString))
+  }
+
+  private def filterExcludedDates(terms: List[TermExt], monitoring: Monitoring): List[TermExt] =
+    terms.filterNot(term => monitoring.isDateExcluded(term.term.dateTimeFrom.get.toLocalDate))
 
   private def initializeMonitorings(allMonitorings: Seq[Monitoring]): Unit = {
     allMonitorings.foreach { monitoring =>
@@ -260,8 +272,8 @@ class MonitoringService extends StrictLogging {
   }
 
   def createMonitoring(monitoring: Monitoring): Monitoring = {
-    val userMonitoringsCount = dataService.getActiveMonitoringsCount(monitoring.accountId)
-    require(userMonitoringsCount + 1 <= 10, lang(monitoring.userId).maximumMonitoringsLimitExceeded)
+    val activeMonitoringsWeight = dataService.getActiveMonitorings(monitoring.accountId).map(_.slotWeight).sum
+    require(activeMonitoringsWeight + monitoring.slotWeight <= 10, lang(monitoring.userId).maximumMonitoringsLimitExceeded)
     dataService.saveMonitoring(monitoring)
   }
 
@@ -281,17 +293,8 @@ class MonitoringService extends StrictLogging {
     val monitoringMaybe = dataService.findMonitoring(accountId, monitoringId)
     monitoringMaybe match {
       case Some(monitoring) =>
-        val termsEither = apiService.getAvailableTerms(
-          monitoring.accountId,
-          monitoring.cityId,
-          monitoring.clinicId,
-          monitoring.serviceId,
-          monitoring.doctorId,
-          monitoring.dateFrom.toLocalDateTime,
-          monitoring.dateTo.toLocalDateTime,
-          timeFrom = monitoring.timeFrom,
-          timeTo = monitoring.timeTo
-        )
+        val termsEither = getAvailableTerms(monitoring, monitoring.dateFrom.toLocalDateTime)
+          .map(filterExcludedDates(_, monitoring))
         termsEither match {
           case Right(terms) =>
             val termMaybe = terms.find(term =>

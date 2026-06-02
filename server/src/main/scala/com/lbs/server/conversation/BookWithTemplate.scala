@@ -43,12 +43,15 @@ class BookWithTemplate(
       val bookingData = BookingData(
         cityId = IdName.from(monitoring.cityId, monitoring.cityName),
         clinicId = IdName.from(monitoring.clinicId, monitoring.clinicName),
+        clinicIds = monitoring.clinics.map { case (id, name) => IdName(id.getOrElse(-1L), name) },
         serviceId = IdName.from(monitoring.serviceId, monitoring.serviceName),
         doctorId = IdName.from(monitoring.doctorId, monitoring.doctorName),
         dateFrom = monitoring.dateFrom.toLocalDateTime,
         dateTo = monitoring.dateTo.toLocalDateTime,
         timeFrom = monitoring.timeFrom,
-        timeTo = monitoring.timeTo
+        timeTo = monitoring.timeTo,
+        excludedWeekdays = monitoring.excludedWeekdaysSet,
+        excludedDates = monitoring.excludedDatesSet
       )
       goto(requestDateFrom).using(bookingData)
     }
@@ -126,17 +129,7 @@ class BookWithTemplate(
 
   private def requestTerm: Step =
     ask { bookingData =>
-      val availableTerms = apiService.getAvailableTerms(
-        userId.accountId,
-        bookingData.cityId.id,
-        bookingData.clinicId.optionalId,
-        bookingData.serviceId.id,
-        bookingData.doctorId.optionalId,
-        bookingData.dateFrom,
-        bookingData.dateTo,
-        timeFrom = bookingData.timeFrom,
-        timeTo = bookingData.timeTo
-      )
+      val availableTerms = getAvailableTerms(bookingData)
       termsPager.restart()
       termsPager ! availableTerms.map(new SimpleItemsProvider(_))
     } onReply {
@@ -312,6 +305,30 @@ class BookWithTemplate(
       }
       end()
     }
+
+  private def getAvailableTerms(bookingData: BookingData): Either[Throwable, List[TermExt]] = {
+    bookingData.clinicOptions.foldLeft[Either[Throwable, List[TermExt]]](Right(Nil)) { (acc, clinicId) =>
+      for {
+        terms <- acc
+        next <- apiService.getAvailableTerms(
+          userId.accountId,
+          bookingData.cityId.id,
+          clinicId,
+          bookingData.serviceId.id,
+          bookingData.doctorId.optionalId,
+          bookingData.dateFrom,
+          bookingData.dateTo,
+          timeFrom = bookingData.timeFrom,
+          timeTo = bookingData.timeTo
+        )
+      } yield terms ++ next
+    }.map(terms =>
+      terms
+        .filterNot(term => bookingData.excludedWeekdays.contains(term.term.dateTimeFrom.get.getDayOfWeek))
+        .filterNot(term => bookingData.excludedDates.contains(term.term.dateTimeFrom.get.toLocalDate))
+        .sortBy(_.term.dateTimeFrom.get.toString)
+    )
+  }
 
   beforeDestroy {
     datePicker.destroy()

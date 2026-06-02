@@ -8,12 +8,13 @@ import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.NoItemsFound
 import com.lbs.server.conversation.base.ConversationTestProbe
 import com.lbs.server.lang.{En, Localization}
-import com.lbs.server.repository.model.Settings
+import com.lbs.server.repository.model.{Monitoring, Settings}
 import com.lbs.server.service.{ApiService, DataService, MonitoringService}
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.*
 import org.mockito.Mockito.*
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime}
 
 class BookSpec extends AkkaTestKit {
 
@@ -57,6 +58,7 @@ class BookSpec extends AkkaTestKit {
     book ! IdName(1L, "Wroclaw")
     book ! IdName(100L, "GP Consultation")
     book ! IdName(10L, "Swobodna Clinic")
+    book ! callbackCmd(Tags.Continue)
     book ! IdName(50L, "Dr Smith")
   }
 
@@ -205,6 +207,7 @@ class BookSpec extends AkkaTestKit {
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
+        book ! callbackCmd(Tags.No) // no exclusions
         book ! callbackCmd(Tags.BookManually)
         awaitAssert(verify(monitoringService).createMonitoring(any()))
       }
@@ -304,6 +307,7 @@ class BookSpec extends AkkaTestKit {
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
         book ! Command(source, Message("1", Some("30")), None) // enter offset
+        book ! callbackCmd(Tags.No)                            // no exclusions
         book ! callbackCmd(Tags.BookByApplication)            // autobook = true
         book ! callbackCmd(Tags.Yes)                          // rebookIfExists = true
         awaitAssert(verify(monitoringService).createMonitoring(any()))
@@ -330,8 +334,48 @@ class BookSpec extends AkkaTestKit {
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
         book ! callbackCmd(Tags.No)           // skip offset
+        book ! callbackCmd(Tags.No)           // no exclusions
         book ! callbackCmd(Tags.BookManually) // manual booking
         awaitAssert(verify(monitoringService).createMonitoring(any()))
+      }
+
+      "create one monitoring with multiple clinics and exclusions" in {
+        val dp = ConversationTestProbe[DatePicker]()
+        val tp = ConversationTestProbe[TimePicker]()
+        val sp = ConversationTestProbe[StaticData]()
+        val pp = ConversationTestProbe[Pager[TermExt]]()
+        val apiService        = makeApiService
+        val dataService       = makeDataService
+        val monitoringService = makeMonitoringService
+        doNothing().when(dataService).storeAppointment(any(), any())
+        stubGetTerms(apiService, Right(Nil))
+        when(dataService.findSettings(anyLong())).thenReturn(None)
+        val book = makeBook(apiService = apiService, dataService = dataService,
+                            monitoringService = monitoringService)(dp, tp, sp, pp)
+        book.start()
+        book ! IdName(1L, "Wroclaw")
+        book ! IdName(100L, "GP Consultation")
+        book ! IdName(10L, "Swobodna Clinic")
+        book ! callbackCmd(Tags.AddAnotherClinic)
+        book ! IdName(11L, "Legnicka Clinic")
+        book ! callbackCmd(Tags.Continue)
+        book ! IdName(50L, "Dr Smith")
+        selectDates(book)
+        book ! callbackCmd(Tags.FindTerms)
+        book ! NoItemsFound
+        book ! callbackCmd(Tags.CreateMonitoring)
+        book ! callbackCmd(Tags.Yes) // add exclusions
+        book ! callbackCmd(Tags.WeekdayPrefix + DayOfWeek.TUESDAY.getValue)
+        book ! callbackCmd(Tags.Done)
+        book ! Command(source, Message("1", Some("2026-06-10")), None)
+        book ! callbackCmd(Tags.BookManually)
+
+        val captor = ArgumentCaptor.forClass(classOf[Monitoring])
+        awaitAssert(verify(monitoringService).createMonitoring(captor.capture()))
+        val monitoring = captor.getValue
+        assert(monitoring.clinicOptions == Seq(Some(10L), Some(11L)))
+        assert(monitoring.excludedWeekdaysSet == Set(DayOfWeek.TUESDAY))
+        assert(monitoring.excludedDatesSet == Set(LocalDate.parse("2026-06-10")))
       }
     }
   }

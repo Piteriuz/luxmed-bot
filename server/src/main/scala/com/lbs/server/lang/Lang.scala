@@ -6,7 +6,7 @@ import com.lbs.server.conversation.RehabBook.RehabBookingData
 import com.lbs.server.conversation.StaticData.StaticDataConfig
 import com.lbs.server.repository.model.Monitoring
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime}
 import java.util.Locale
 import scala.io.Source
 import scala.util.Try
@@ -84,6 +84,28 @@ trait Lang {
   def monitoringHasBeenCreated: String
 
   def unableToCreateMonitoring(reason: String): String
+
+  def selectedClinics(bookingData: BookingData): String
+
+  def addAnotherClinic: String
+
+  def continueBooking: String
+
+  def addMonitoringExclusions: String
+
+  def chooseExcludedWeekdays(excludedWeekdays: Set[DayOfWeek]): String
+
+  def pleaseEnterExcludedDates: String
+
+  def unableToParseExcludedDates(value: String): String
+
+  def done: String
+
+  def weekdayName(dayOfWeek: DayOfWeek): String
+
+  def excludedWeekdaysLabel(excludedWeekdays: Set[DayOfWeek]): String
+
+  def excludedDatesLabel(excludedDates: Set[LocalDate]): String
 
   def chooseTypeOfMonitoring: String
 

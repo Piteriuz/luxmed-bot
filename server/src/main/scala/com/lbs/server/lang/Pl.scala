@@ -7,7 +7,8 @@ import com.lbs.server.conversation.StaticData.StaticDataConfig
 import com.lbs.server.repository.model.Monitoring
 import com.lbs.server.util.DateTimeUtil.*
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime}
+import java.time.format.TextStyle
 import java.util.Locale
 
 object Pl extends Lang {
@@ -62,7 +63,7 @@ object Pl extends Lang {
   override def bookingSummary(bookingData: Book.BookingData): String =
     s"🦄 Ok! Zarezerwujemy wizytę typu <b>${bookingData.serviceId.name}</b>" +
       s" z lekarzem: <b>${bookingData.doctorId.name}</b>" +
-      s" w klinice: <b>${bookingData.clinicId.name}</b>" +
+      s" w klinice: <b>${bookingData.selectedClinics.map(_.name).mkString(", ")}</b>" +
       s" w mieście <b>${bookingData.cityId.name}</b>." +
       s"\nWybrane daty: <b>${formatDate(bookingData.dateFrom, locale)}</b> -> <b>${formatDate(bookingData.dateTo, locale)}</b>" +
       s" w godzinach: <b>${formatTime(bookingData.timeFrom)} -> ${formatTime(bookingData.timeTo)}</b>" +
@@ -93,6 +94,43 @@ object Pl extends Lang {
 
   override def unableToCreateMonitoring(reason: String): String =
     s"👎 Nie udało się stworzyć monitoringu. Powód: $reason."
+
+  override def selectedClinics(bookingData: Book.BookingData): String =
+    s"""<b>➡</b> Wybrane kliniki:
+       |<b>${bookingData.selectedClinics.map(_.name).mkString(", ")}</b>
+       |
+       |Czy chcesz dodać kolejną klinikę?""".stripMargin
+
+  override def addAnotherClinic: String = "➕ Dodaj kolejną"
+
+  override def continueBooking: String = "Dalej"
+
+  override def addMonitoringExclusions: String =
+    "<b>➡</b> Czy chcesz dodać wykluczenia dni dla monitoringu?"
+
+  override def chooseExcludedWeekdays(excludedWeekdays: Set[DayOfWeek]): String =
+    s"""<b>➡</b> Wybierz dni tygodnia do wykluczenia.
+       |
+       |${excludedWeekdaysLabel(excludedWeekdays)}""".stripMargin
+
+  override def pleaseEnterExcludedDates: String =
+    "<b>➡</b> Podaj konkretne daty do wykluczenia, np. 2026-06-10, 15-06, albo kliknij Nie"
+
+  override def unableToParseExcludedDates(value: String): String =
+    s"Nie udało się rozpoznać daty: $value. Użyj formatu YYYY-MM-DD albo DD-MM."
+
+  override def done: String = "Gotowe"
+
+  override def weekdayName(dayOfWeek: DayOfWeek): String =
+    dayOfWeek.getDisplayName(TextStyle.FULL, locale)
+
+  override def excludedWeekdaysLabel(excludedWeekdays: Set[DayOfWeek]): String =
+    if (excludedWeekdays.isEmpty) "Wykluczone dni tygodnia: brak"
+    else s"Wykluczone dni tygodnia: ${excludedWeekdays.toSeq.sortBy(_.getValue).map(weekdayName).mkString(", ")}"
+
+  override def excludedDatesLabel(excludedDates: Set[LocalDate]): String =
+    if (excludedDates.isEmpty) "Wykluczone daty: brak"
+    else s"Wykluczone daty: ${excludedDates.toSeq.sortBy(_.toString).mkString(", ")}"
 
   override def chooseTypeOfMonitoring: String = "<b>➡</b> Wybierz typ monitoringu"
 
@@ -128,7 +166,9 @@ object Pl extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}""".stripMargin
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}""".stripMargin
 
   override def deactivated: String = "👍 Wyłączony! Sprawdź aktywne monitoringi przez /monitorings"
 
@@ -246,8 +286,10 @@ object Pl extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |Sposób rejestracji: ${if (monitoring.autobook) "Automatyczny" else "Ręczny"}
        |Nadpisz istniejącą wizytę: ${if (monitoring.rebookIfExists) "Tak" else "Nie"}
        |<b>➡</b> /cancel_$index
@@ -259,8 +301,10 @@ object Pl extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |Sposób rejestracji: ${if (monitoring.autobook) "Automatyczny" else "Ręczny"}
        |<b>➡</b> /repeat_$index
        |
@@ -299,8 +343,10 @@ object Pl extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |
        |<b>➡</b> Stwórz nowy monitoring przez /book""".stripMargin
 

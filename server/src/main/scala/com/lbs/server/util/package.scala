@@ -19,6 +19,7 @@ import scala.util.Try
     implicit val BookingDataToMonitoringConverter: ObjectConverter[(UserId, BookingData), Monitoring] =
       (data: (UserId, BookingData)) => {
         val (userId, bookingData) = data
+        val primaryClinic = bookingData.selectedClinics.headOption.getOrElse(IdName(-1L, "Any"))
         Monitoring(
           userId = userId.userId,
           username = userId.username,
@@ -28,8 +29,9 @@ import scala.util.Try
           payerId = bookingData.payerId,
           cityId = bookingData.cityId.id,
           cityName = bookingData.cityId.name,
-          clinicId = bookingData.clinicId.optionalId,
-          clinicName = bookingData.clinicId.name,
+          clinicId = primaryClinic.optionalId,
+          clinicName = primaryClinic.name,
+          clinics = bookingData.selectedClinics.map(c => c.optionalId -> c.name),
           serviceId = bookingData.serviceId.id,
           serviceName = bookingData.serviceId.name,
           doctorId = bookingData.doctorId.optionalId,
@@ -40,7 +42,9 @@ import scala.util.Try
           timeTo = bookingData.timeTo,
           autobook = bookingData.autobook,
           rebookIfExists = bookingData.rebookIfExists,
-          offset = bookingData.offset
+          offset = bookingData.offset,
+          excludedWeekdays = bookingData.excludedWeekdays,
+          excludedDates = bookingData.excludedDates
         )
       }
 
@@ -243,4 +247,3 @@ import scala.util.Try
       LocalTime.parse(hourMinuteStr, TimeFormat)
     }
   }
-

@@ -7,7 +7,8 @@ import com.lbs.server.conversation.StaticData.StaticDataConfig
 import com.lbs.server.repository.model.Monitoring
 import com.lbs.server.util.DateTimeUtil.*
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime}
+import java.time.format.TextStyle
 import java.util.Locale
 
 object Ua extends Lang {
@@ -62,7 +63,7 @@ object Ua extends Lang {
   override def bookingSummary(bookingData: Book.BookingData): String =
     s"🦄 Супер! Ми збираємося зарезервувати послугу <b>${bookingData.serviceId.name}</b>" +
       s" з обраним лікарем <b>${bookingData.doctorId.name}</b>" +
-      s" в <b>${bookingData.clinicId.name}</b> клініці" +
+      s" в <b>${bookingData.selectedClinics.map(_.name).mkString(", ")}</b> клініці" +
       s" міста <b>${bookingData.cityId.name}</b>." +
       s"\nБажані дати: <b>${formatDate(bookingData.dateFrom, locale)}</b> -> <b>${formatDate(bookingData.dateTo, locale)}</b>" +
       s"\nЧас: <b>${formatTime(bookingData.timeFrom)}</b> -> <b>${formatTime(bookingData.timeTo)}</b>" +
@@ -92,6 +93,43 @@ object Ua extends Lang {
 
   override def unableToCreateMonitoring(reason: String): String =
     s"👎 Не вдається створити моніторинг. Причина: $reason."
+
+  override def selectedClinics(bookingData: Book.BookingData): String =
+    s"""<b>➡</b> Вибрані клініки:
+       |<b>${bookingData.selectedClinics.map(_.name).mkString(", ")}</b>
+       |
+       |Додати ще одну клініку?""".stripMargin
+
+  override def addAnotherClinic: String = "➕ Додати ще"
+
+  override def continueBooking: String = "Далі"
+
+  override def addMonitoringExclusions: String =
+    "<b>➡</b> Додати виключені дні для цього моніторингу?"
+
+  override def chooseExcludedWeekdays(excludedWeekdays: Set[DayOfWeek]): String =
+    s"""<b>➡</b> Виберіть дні тижня для виключення.
+       |
+       |${excludedWeekdaysLabel(excludedWeekdays)}""".stripMargin
+
+  override def pleaseEnterExcludedDates: String =
+    "<b>➡</b> Введіть конкретні дати для виключення, наприклад 2026-06-10, 15-06, або натисніть Ні"
+
+  override def unableToParseExcludedDates(value: String): String =
+    s"Не вдалося розпізнати дату: $value. Використайте формат YYYY-MM-DD або DD-MM."
+
+  override def done: String = "Готово"
+
+  override def weekdayName(dayOfWeek: DayOfWeek): String =
+    dayOfWeek.getDisplayName(TextStyle.FULL, locale)
+
+  override def excludedWeekdaysLabel(excludedWeekdays: Set[DayOfWeek]): String =
+    if (excludedWeekdays.isEmpty) "Виключені дні тижня: немає"
+    else s"Виключені дні тижня: ${excludedWeekdays.toSeq.sortBy(_.getValue).map(weekdayName).mkString(", ")}"
+
+  override def excludedDatesLabel(excludedDates: Set[LocalDate]): String =
+    if (excludedDates.isEmpty) "Виключені дати: немає"
+    else s"Виключені дати: ${excludedDates.toSeq.sortBy(_.toString).mkString(", ")}"
 
   override def chooseTypeOfMonitoring: String = "<b>➡</b> Будь ласка, виберіть тип моніторингу"
 
@@ -127,7 +165,9 @@ object Ua extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}""".stripMargin
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}""".stripMargin
 
   override def deactivated: String = "👍 Деактивовано! Список активних /monitorings"
 
@@ -244,8 +284,10 @@ object Ua extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |Тип: ${if (monitoring.autobook) "Автоматичний" else "Ручний"}
        |Оновити наявне бронювання: ${if (monitoring.rebookIfExists) "Так" else "Ні"}
        |<b>➡</b> /cancel_$index
@@ -257,8 +299,10 @@ object Ua extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |Тип: ${if (monitoring.autobook) "Автоматичний" else "Ручний"}
        |<b>➡</b> /repeat_$index
        |
@@ -297,8 +341,10 @@ object Ua extends Lang {
        |⏱ <b>${formatTime(monitoring.timeFrom)}</b> -> <b>${formatTime(monitoring.timeTo)}</b>
        |${capitalize(doctor)}: ${monitoring.doctorName}
        |${capitalize(service)}: ${monitoring.serviceName}
-       |${capitalize(clinic)}: ${monitoring.clinicName}
+       |${capitalize(clinic)}: ${monitoring.clinicDisplayName}
        |${capitalize(city)}: ${monitoring.cityName}
+       |${excludedWeekdaysLabel(monitoring.excludedWeekdaysSet)}
+       |${excludedDatesLabel(monitoring.excludedDatesSet)}
        |
        |<b>➡</b> Створити новий моніторінг /book""".stripMargin
 
