@@ -51,10 +51,24 @@ object Pl extends Lang {
        |""".stripMargin
 
   override def chooseDateFrom(exampleDate: LocalDateTime): String =
-    s"<b>➡</b> Wybierz datę albo zapisz ją w formacie dd-MM, np. ${formatDateShort(exampleDate)}"
+    s"<b>➡</b> Wybierz datę, szybki zakres albo wpisz zakres, np. ${formatDateShort(exampleDate)} ${formatDateShort(exampleDate.plusDays(7))}"
 
   override def chooseDateTo(exampleDate: LocalDateTime): String =
     s"<b>➡</b> Wybierz datę albo zapisz ją w formacie dd-MM, np. ${formatDateShort(exampleDate)}"
+
+  override def quickRangeToday: String = "Dzisiaj"
+
+  override def quickRangeTomorrow: String = "Jutro"
+
+  override def quickRangeNext7Days: String = "Najbliższe 7 dni"
+
+  override def quickRangeNext14Days: String = "Najbliższe 14 dni"
+
+  override def dateRangeIs(dateFrom: LocalDateTime, dateTo: LocalDateTime): String =
+    s"📅 Zakres dat: ${formatDate(dateFrom, locale)} -> ${formatDate(dateTo, locale)}"
+
+  override def incorrectDateFormat: String =
+    "Niepoprawna data. Użyj formatu dd-MM, YYYY-MM-DD albo zakresu, np. 10-06 20-06"
 
   override def findTerms: String = "🔍 Szukaj terminów"
 

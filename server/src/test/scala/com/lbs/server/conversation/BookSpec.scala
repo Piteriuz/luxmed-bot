@@ -3,6 +3,7 @@ package com.lbs.server.conversation
 import com.lbs.api.json.model.*
 import com.lbs.bot.Bot
 import com.lbs.bot.model.{Command, InlineKeyboard, Message, MessageSource, TelegramMessageSourceSystem}
+import com.lbs.server.conversation.DatePicker.DateRange
 import com.lbs.server.conversation.Book.Tags
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.NoItemsFound
@@ -175,6 +176,29 @@ class BookSpec extends AkkaTestKit {
         book ! LocalTime.of(9, 0)
         book ! LocalTime.of(18, 0)
         succeed
+      }
+
+      "accept a date range from date picker and skip requestDateTo" in {
+        val dp = ConversationTestProbe[DatePicker]()
+        val tp = ConversationTestProbe[TimePicker]()
+        val sp = ConversationTestProbe[StaticData]()
+        val pp = ConversationTestProbe[Pager[TermExt]]()
+        val apiService  = makeApiService
+        val dataService = makeDataService
+        val bot         = makeBot
+        stubBookingFlow(apiService, dataService)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val from = LocalDateTime.now().plusDays(1)
+        val to = from.plusDays(7)
+        book.start()
+        selectStaticData(book, bot)
+        book ! DateRange(from, to)
+        book ! LocalTime.of(8, 0)
+        book ! LocalTime.of(20, 0)
+        book ! callbackCmd(Tags.FindTerms)
+        awaitAssert(verify(apiService, times(1)).getAvailableTerms(
+          anyLong(), anyLong(), any(), anyLong(), any(), any(), any(), any(), any(), anyLong()
+        ))
       }
 
       "delete temporary reservation when Cancel is clicked" in {

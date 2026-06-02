@@ -57,6 +57,18 @@ trait Lang {
 
   def chooseDateTo(exampleDate: LocalDateTime): String
 
+  def quickRangeToday: String
+
+  def quickRangeTomorrow: String
+
+  def quickRangeNext7Days: String
+
+  def quickRangeNext14Days: String
+
+  def dateRangeIs(dateFrom: LocalDateTime, dateTo: LocalDateTime): String
+
+  def incorrectDateFormat: String
+
   def chooseTimeFrom(exampleTime: LocalTime): String
 
   def chooseTimeTo(exampleTime: LocalTime): String

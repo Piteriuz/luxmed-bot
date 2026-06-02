@@ -3,7 +3,7 @@ package com.lbs.server.conversation
 import com.lbs.api.json.model.*
 import com.lbs.bot.*
 import com.lbs.bot.model.{Button, Command}
-import com.lbs.server.conversation.DatePicker.{DateFromMode, DateToMode}
+import com.lbs.server.conversation.DatePicker.{DateFromMode, DateRange, DateToMode}
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.SimpleItemsProvider
 import com.lbs.server.conversation.RehabBook.*
@@ -203,6 +203,8 @@ class RehabBook(
       case Msg(cmd: Command, _) =>
         datePicker ! cmd
         stay()
+      case Msg(dateRange: DateRange, data: RehabBookingData) =>
+        goto(requestTimeFrom).using(data.copy(dateFrom = dateRange.from, dateTo = capDateTo(dateRange.from, dateRange.to)))
       case Msg(date: LocalDateTime, data: RehabBookingData) =>
         goto(requestDateTo).using(data.copy(dateFrom = date))
     }
@@ -218,9 +220,7 @@ class RehabBook(
         stay()
       case Msg(date: LocalDateTime, data: RehabBookingData) =>
         // Enforce MaxIntervalInDays = 13
-        val maxDate = data.dateFrom.plusDays(13)
-        val effectiveDate = if (date.isAfter(maxDate)) maxDate else date
-        goto(requestTimeFrom).using(data.copy(dateTo = effectiveDate))
+        goto(requestTimeFrom).using(data.copy(dateTo = capDateTo(data.dateFrom, date)))
     }
 
   private def requestTimeFrom: Step =
@@ -568,6 +568,11 @@ class RehabBook(
   private def filterSelectedFacilities(terms: List[TermExt], facilityIds: Seq[Long]): List[TermExt] =
     if (facilityIds.size <= 1) terms
     else terms.filter(term => facilityIds.contains(term.term.clinicGroupId))
+
+  private def capDateTo(dateFrom: LocalDateTime, dateTo: LocalDateTime): LocalDateTime = {
+    val maxDate = dateFrom.plusDays(13)
+    if (dateTo.isAfter(maxDate)) maxDate else dateTo
+  }
 
   private def rehabCityConfig = StaticDataConfig(lang.city, "wro", "Wrocław", isAnyAllowed = false)
 

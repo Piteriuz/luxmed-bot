@@ -4,7 +4,7 @@ import com.lbs.api.json.model.*
 import com.lbs.bot.*
 import com.lbs.bot.model.{Button, Command}
 import com.lbs.server.conversation.Book.*
-import com.lbs.server.conversation.DatePicker.{DateFromMode, DateToMode}
+import com.lbs.server.conversation.DatePicker.{DateFromMode, DateRange, DateToMode}
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.SimpleItemsProvider
 import com.lbs.server.conversation.StaticData.StaticDataConfig
@@ -125,6 +125,8 @@ class Book(
       case Msg(cmd: Command, _) =>
         datePicker ! cmd
         stay()
+      case Msg(dateRange: DateRange, bookingData: BookingData) =>
+        goto(requestTimeFrom).using(bookingData.copy(dateFrom = dateRange.from, dateTo = dateRange.to))
       case Msg(date: LocalDateTime, bookingData: BookingData) =>
         goto(requestDateTo).using(bookingData.copy(dateFrom = date))
     }

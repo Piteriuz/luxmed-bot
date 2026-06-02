@@ -51,10 +51,24 @@ object Ua extends Lang {
        |""".stripMargin
 
   override def chooseDateFrom(exampleDate: LocalDateTime): String =
-    s"<b>➡</b> Будь ласка, виберіть початкову дату або введіть її, використовуючи формат dd-MM, наприклад ${formatDateShort(exampleDate)}"
+    s"<b>➡</b> Виберіть дату, швидкий діапазон або введіть діапазон, наприклад ${formatDateShort(exampleDate)} ${formatDateShort(exampleDate.plusDays(7))}"
 
   override def chooseDateTo(exampleDate: LocalDateTime): String =
     s"<b>➡</b> Будь ласка, виберіть кінцеву дату або введіть її, використовуючи формат dd-MM, наприклад ${formatDateShort(exampleDate)}"
+
+  override def quickRangeToday: String = "Сьогодні"
+
+  override def quickRangeTomorrow: String = "Завтра"
+
+  override def quickRangeNext7Days: String = "Наступні 7 днів"
+
+  override def quickRangeNext14Days: String = "Наступні 14 днів"
+
+  override def dateRangeIs(dateFrom: LocalDateTime, dateTo: LocalDateTime): String =
+    s"📅 Діапазон дат: ${formatDate(dateFrom, locale)} -> ${formatDate(dateTo, locale)}"
+
+  override def incorrectDateFormat: String =
+    "Неправильна дата. Використовуйте dd-MM, YYYY-MM-DD або діапазон, наприклад 10-06 20-06"
 
   override def findTerms: String = "🔍 Знайти терміни"
 
