@@ -1,6 +1,7 @@
 version: '3.4'
 services:
   luxmedbookingservice:
+    container_name: luxmed-bot
     image: ghcr.io/piteriuz/luxmed-bot:latest
     env_file: secrets.env
     environment:
@@ -10,9 +11,14 @@ services:
       - lbs:/lbs
     depends_on:
       - database
+    networks:
+      luxmed-bot:
+        aliases:
+          - luxmed-bot
     restart: unless-stopped
 
   database:
+    container_name: luxmed-bot-database
     image: postgres:10.6
     volumes:
       - postgres:/var/lib/postgresql/data
@@ -21,6 +27,10 @@ services:
       - POSTGRES_PASSWORD=lsb123
       - POSTGRES_DB=lbs
       - TZ=Europe/Warsaw
+    networks:
+      luxmed-bot:
+        aliases:
+          - database
     restart: unless-stopped
 
 volumes:
@@ -28,3 +38,7 @@ volumes:
     name: postgres
   lbs:
     name: lbs
+
+networks:
+  luxmed-bot:
+    name: luxmed-bot

@@ -2,6 +2,7 @@ name: luxmed-bot
 
 services:
   luxmed-bot:
+    container_name: luxmed-bot
     image: ghcr.io/piteriuz/luxmed-bot:latest
     deploy:
       resources:
@@ -19,6 +20,10 @@ services:
         target: /lbs
     depends_on:
       - database
+    networks:
+      luxmed-bot:
+        aliases:
+          - luxmed-bot
     x-casaos:
       envs:
         - container: TELEGRAM_TOKEN
@@ -37,6 +42,7 @@ services:
       container_name: luxmed-bot
 
   database:
+    container_name: luxmed-bot-database
     image: postgres:10.6
     deploy:
       resources:
@@ -52,6 +58,10 @@ services:
       - type: bind
         source: /DATA/AppData/$AppID/postgres
         target: /var/lib/postgresql/data
+    networks:
+      luxmed-bot:
+        aliases:
+          - database
     x-casaos:
       volumes:
         - container: /var/lib/postgresql/data
@@ -83,3 +93,7 @@ x-casaos:
   title:
     en_us: Luxmed Bot
     pl_pl: Luxmed Bot
+
+networks:
+  luxmed-bot:
+    name: luxmed-bot
