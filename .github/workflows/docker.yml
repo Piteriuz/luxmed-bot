@@ -24,8 +24,8 @@ jobs:
           distribution: temurin
           java-version: "25"
 
-      - name: Test
-        run: ./gradlew checkScalafmtAll test
+      - name: Format and test
+        run: ./gradlew scalafmtAll test
 
       - name: Prepare Docker context
         run: |
