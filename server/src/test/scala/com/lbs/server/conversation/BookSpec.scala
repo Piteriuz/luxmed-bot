@@ -203,26 +203,26 @@ class BookSpec extends AkkaTestKit {
         book ! IdName(50L, "Dr Smith")
         dp.expectMsg(DatePicker.DateFromMode)
         dp.expectMsgType[LocalDateTime]
-        awaitAssert {
-          book ! DateRange(from, to)
-          verify(bot, atLeastOnce()).sendMessage(
-            any[MessageSource](),
-            contains("Please choose time from"),
-            any[Option[InlineKeyboard]]()
-          )
+        book ! DateRange(from, to)
+        tp.fishForMessage() {
+          case TimePicker.TimeFromMode => true
+          case _                       => false
         }
-        awaitAssert {
-          book ! LocalTime.of(8, 0)
-          verify(bot, atLeastOnce()).sendMessage(
-            any[MessageSource](),
-            contains("Please choose time to"),
-            any[Option[InlineKeyboard]]()
-          )
+        tp.fishForMessage() {
+          case _: LocalTime => true
+          case _            => false
         }
-        awaitAssert {
-          book ! LocalTime.of(20, 0)
-          verify(dataService, atLeastOnce()).storeAppointment(any(), any())
+        book ! LocalTime.of(8, 0)
+        tp.fishForMessage() {
+          case TimePicker.TimeToMode => true
+          case _                     => false
         }
+        tp.fishForMessage() {
+          case _: LocalTime => true
+          case _            => false
+        }
+        book ! LocalTime.of(20, 0)
+        awaitAssert(verify(dataService, atLeastOnce()).storeAppointment(any(), any()))
         book ! callbackCmd(Tags.FindTerms)
         awaitAssert(verify(apiService, atLeastOnce()).getAvailableTerms(
           anyLong(), anyLong(), any(), anyLong(), any(), any(), any(), any(), any(), anyLong()
