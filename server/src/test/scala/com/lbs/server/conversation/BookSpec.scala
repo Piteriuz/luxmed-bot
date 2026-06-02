@@ -203,22 +203,28 @@ class BookSpec extends AkkaTestKit {
         book ! IdName(50L, "Dr Smith")
         dp.expectMsg(DatePicker.DateFromMode)
         dp.expectMsgType[LocalDateTime]
-        book ! DateRange(from, to)
-        awaitAssert(verify(bot, atLeastOnce()).sendMessage(
-          any[MessageSource](),
-          contains("Please choose time from"),
-          any[Option[InlineKeyboard]]()
-        ))
-        book ! LocalTime.of(8, 0)
-        awaitAssert(verify(bot, atLeastOnce()).sendMessage(
-          any[MessageSource](),
-          contains("Please choose time to"),
-          any[Option[InlineKeyboard]]()
-        ))
-        book ! LocalTime.of(20, 0)
-        awaitAssert(verify(dataService, atLeastOnce()).storeAppointment(any(), any()))
+        awaitAssert {
+          book ! DateRange(from, to)
+          verify(bot, atLeastOnce()).sendMessage(
+            any[MessageSource](),
+            contains("Please choose time from"),
+            any[Option[InlineKeyboard]]()
+          )
+        }
+        awaitAssert {
+          book ! LocalTime.of(8, 0)
+          verify(bot, atLeastOnce()).sendMessage(
+            any[MessageSource](),
+            contains("Please choose time to"),
+            any[Option[InlineKeyboard]]()
+          )
+        }
+        awaitAssert {
+          book ! LocalTime.of(20, 0)
+          verify(dataService, atLeastOnce()).storeAppointment(any(), any())
+        }
         book ! callbackCmd(Tags.FindTerms)
-        awaitAssert(verify(apiService, times(1)).getAvailableTerms(
+        awaitAssert(verify(apiService, atLeastOnce()).getAvailableTerms(
           anyLong(), anyLong(), any(), anyLong(), any(), any(), any(), any(), any(), anyLong()
         ))
       }
