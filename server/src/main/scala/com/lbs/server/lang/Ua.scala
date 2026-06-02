@@ -100,6 +100,12 @@ object Ua extends Lang {
        |
        |Додати ще одну клініку?""".stripMargin
 
+  override def selectedRehabFacilities(data: RehabBookingData): String =
+    s"""<b>➡</b> Вибрані реабілітаційні клініки:
+       |<b>${data.selectedFacilities.map(_.name).mkString(", ")}</b>
+       |
+       |Додати ще одну клініку?""".stripMargin
+
   override def addAnotherClinic: String = "➕ Додати ще"
 
   override def continueBooking: String = "Далі"
@@ -463,7 +469,7 @@ object Ua extends Lang {
     s"""🏥 <b>Резервація реабілітації</b>
        |Послуга: ${data.serviceVariantName}
        |Місто: ${data.cityId.name}
-       |Заклад: ${if (data.facilityId != null) data.facilityId.name else "Будь-який"}
+       |Заклад: ${if (data.selectedFacilities.nonEmpty) data.selectedFacilities.map(_.name).mkString(", ") else "Будь-який"}
        |Фізіотерапевт: ${if (data.physiotherapistId != null) data.physiotherapistId.name else "Будь-який"}
        |Дата: ${formatDate(data.dateFrom, locale)} — ${formatDate(data.dateTo, locale)}
        |Час: ${formatTime(data.timeFrom)} — ${formatTime(data.timeTo)}

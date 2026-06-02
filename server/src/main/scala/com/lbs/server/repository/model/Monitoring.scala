@@ -148,6 +148,13 @@ class Monitoring extends RecordId {
     case xs  => xs
   }
 
+  def clinicFilter: Seq[Long] = clinicOptions.flatten.distinct
+
+  def singleClinicId: Option[Long] = {
+    val selected = clinicOptions.distinct
+    if (selected.size == 1) selected.head else None
+  }
+
   def clinicDisplayName: String = clinics.map(_._2).filter(_.nonEmpty).distinct.mkString(", ")
 
   def slotWeight: Int = {

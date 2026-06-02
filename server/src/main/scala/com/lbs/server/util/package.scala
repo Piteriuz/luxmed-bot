@@ -146,6 +146,7 @@ import scala.util.Try
     implicit val RehabBookingDataToMonitoringConverter: ObjectConverter[(UserId, RehabBookingData), Monitoring] =
       (data: (UserId, RehabBookingData)) => {
         val (userId, d) = data
+        val primaryFacility = d.selectedFacilities.headOption.getOrElse(IdName(-1L, "Any"))
         Monitoring(
           userId = userId.userId,
           username = userId.username,
@@ -155,8 +156,9 @@ import scala.util.Try
           payerId = 0L,
           cityId = d.cityId.id,
           cityName = d.cityId.name,
-          clinicId = Option(d.facilityId).flatMap(_.optionalId),
-          clinicName = Option(d.facilityId).map(_.name).getOrElse("Any"),
+          clinicId = primaryFacility.optionalId,
+          clinicName = primaryFacility.name,
+          clinics = d.selectedFacilities.map(f => f.optionalId -> f.name),
           serviceId = d.serviceVariantId,
           serviceName = d.serviceVariantName,
           doctorId = Option(d.physiotherapistId).flatMap(_.optionalId),
@@ -171,7 +173,9 @@ import scala.util.Try
           isRehab = true,
           referralId = Some(d.referralId),
           referralTypeId = Some(d.referralTypeId),
-          serviceVariantId = Some(d.serviceVariantId)
+          serviceVariantId = Some(d.serviceVariantId),
+          excludedWeekdays = d.excludedWeekdays,
+          excludedDates = d.excludedDates
         )
       }
   }

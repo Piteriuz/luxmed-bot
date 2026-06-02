@@ -429,21 +429,20 @@ class Book(
     }
 
   private def getAvailableTerms(bookingData: BookingData): Either[Throwable, List[TermExt]] = {
-    bookingData.clinicOptions.foldLeft[Either[Throwable, List[TermExt]]](Right(Nil)) { (acc, clinicId) =>
-      for {
-        terms <- acc
-        next <- apiService.getAvailableTerms(
-          userId.accountId,
-          bookingData.cityId.id,
-          clinicId,
-          bookingData.serviceId.id,
-          bookingData.doctorId.optionalId,
-          bookingData.dateFrom,
-          bookingData.dateTo,
-          timeFrom = bookingData.timeFrom,
-          timeTo = bookingData.timeTo
-        )
-      } yield terms ++ next
+    val selectedClinicIds = bookingData.clinicFilter
+    apiService.getAvailableTerms(
+      userId.accountId,
+      bookingData.cityId.id,
+      bookingData.singleClinicId,
+      bookingData.serviceId.id,
+      bookingData.doctorId.optionalId,
+      bookingData.dateFrom,
+      bookingData.dateTo,
+      timeFrom = bookingData.timeFrom,
+      timeTo = bookingData.timeTo
+    ).map { terms =>
+      if (selectedClinicIds.size <= 1) terms
+      else terms.filter(term => selectedClinicIds.contains(term.term.clinicGroupId))
     }.map(_.sortBy(_.term.dateTimeFrom.get.toString))
   }
 
@@ -524,7 +523,7 @@ object Book {
       case xs  => xs
     }
 
-    def clinicFilter: Seq[Long] = clinicOptions.flatten
+    def clinicFilter: Seq[Long] = clinicOptions.flatten.distinct
 
     def singleClinicId: Option[Long] = {
       val selected = clinicOptions.distinct

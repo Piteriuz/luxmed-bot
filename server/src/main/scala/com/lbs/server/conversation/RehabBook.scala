@@ -7,6 +7,7 @@ import com.lbs.server.conversation.DatePicker.{DateFromMode, DateToMode}
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.SimpleItemsProvider
 import com.lbs.server.conversation.RehabBook.*
+import com.lbs.server.conversation.StaticData.{FindOptions, FoundOptions, LatestOptions, StaticDataConfig}
 import com.lbs.server.conversation.TimePicker.{TimeFromMode, TimeToMode}
 import com.lbs.server.conversation.base.Conversation
 import com.lbs.server.lang.{Localizable, Localization}
@@ -16,7 +17,9 @@ import com.lbs.server.util.MessageExtractors.*
 import com.lbs.server.util.ServerModelConverters.*
 import org.apache.pekko.actor.ActorSystem
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.format.DateTimeFormatter
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime, MonthDay}
+import scala.util.Try
 
 class RehabBook(
   val userId: UserId,
@@ -28,8 +31,7 @@ class RehabBook(
   datePickerFactory: UserIdWithOriginatorTo[DatePicker],
   timePickerFactory: UserIdWithOriginatorTo[TimePicker],
   referralPagerFactory: UserIdWithOriginatorTo[Pager[Referral]],
-  locationPagerFactory: UserIdWithOriginatorTo[Pager[RehabLocation]],
-  facilityPagerFactory: UserIdWithOriginatorTo[Pager[RehabFacility]],
+  staticDataFactory: UserIdWithOriginatorTo[StaticData],
   physiotherapistPagerFactory: UserIdWithOriginatorTo[Pager[IdName]],
   termsPagerFactory: UserIdWithOriginatorTo[Pager[TermExt]]
 )(val actorSystem: ActorSystem)
@@ -39,8 +41,7 @@ class RehabBook(
   private val datePicker = datePickerFactory(userId, self)
   private val timePicker = timePickerFactory(userId, self)
   private val referralPager = referralPagerFactory(userId, self)
-  private val locationPager = locationPagerFactory(userId, self)
-  private val facilityPager = facilityPagerFactory(userId, self)
+  private[conversation] val staticData = staticDataFactory(userId, self)
   private val physiotherapistPager = physiotherapistPagerFactory(userId, self)
   private val termsPager = termsPagerFactory(userId, self)
 
@@ -96,8 +97,6 @@ class RehabBook(
             bot.sendMessage(userId.source, ex.getMessage)
             end()
           case Right(facilities) =>
-            locationPager.restart()
-            locationPager ! Right(new SimpleItemsProvider(facilities.locations))
             goto(selectCity).using(newData.copy(rehabFacilities = Some(facilities)))
         }
     }
@@ -116,31 +115,47 @@ class RehabBook(
     }
 
   private def selectCity: Step =
-    ask { _ => () } onReply {
-      case Msg(cmd: Command, _) =>
-        locationPager ! cmd
-        stay()
-      case Msg(location: RehabLocation, data: RehabBookingData) =>
-        val newData = data.copy(cityId = location.toIdName)
-        val facilitiesForCity = data.rehabFacilities.map(_.facilities.filter(_.locationId == location.id)).getOrElse(Nil)
-        facilityPager.restart()
-        facilityPager ! Right(new SimpleItemsProvider(facilitiesForCity))
-        goto(selectFacility).using(newData)
-      case Msg(Pager.NoItemsFound, _) =>
-        bot.sendMessage(userId.source, lang.noRehabReferralsFound)
-        end()
-    }
+    staticData(rehabCityConfig) { data =>
+      val locations = data.rehabFacilities.map(_.locations).getOrElse(Nil)
+      staticOptions(
+        staticOptions = Right(locations),
+        applyId = city => data.copy(cityId = city)
+      )
+    }(requestNext = selectFacility)
 
   private def selectFacility: Step =
-    ask { _ => () } onReply {
-      case Msg(cmd: Command, _) =>
-        facilityPager ! cmd
-        stay()
-      case Msg(facility: RehabFacility, data: RehabBookingData) =>
-        goto(askPhysiotherapist).using(data.copy(facilityId = facility.toIdName))
-      case Msg(Pager.NoItemsFound, data: RehabBookingData) =>
-        // No facilities, treat as "Any"
-        goto(askPhysiotherapist).using(data)
+    staticData(rehabFacilityConfig) { data =>
+      val facilities =
+        data.rehabFacilities
+          .map(_.facilities.filter(_.locationId == data.cityId.id))
+          .getOrElse(Nil)
+      staticOptions(
+        staticOptions = Right(facilities),
+        applyId = facility => data.withFacility(facility)
+      )
+    }(requestNext = continueAfterFacility)
+
+  private def continueAfterFacility: Step =
+    process { data =>
+      if (data.hasAnyFacility) goto(askPhysiotherapist)
+      else goto(askAddAnotherFacility)
+    }
+
+  private def askAddAnotherFacility: Step =
+    ask { data =>
+      bot.sendMessage(
+        userId.source,
+        lang.selectedRehabFacilities(data),
+        inlineKeyboard =
+          createInlineKeyboard(
+            Seq(Button(lang.addAnotherClinic, Tags.AddAnotherFacility), Button(lang.continueBooking, Tags.Continue))
+          )
+      )
+    } onReply {
+      case Msg(CallbackCommand(Tags.AddAnotherFacility), _) =>
+        goto(selectFacility)
+      case Msg(CallbackCommand(Tags.Continue), _) =>
+        goto(askPhysiotherapist)
     }
 
   private def askPhysiotherapist: Step =
@@ -151,7 +166,10 @@ class RehabBook(
         case Right(Nil) =>
           goto(requestDateFrom).using(data)
         case Right(doctors) =>
-          val doctorItems = doctors.map(_.toIdName)
+          val facilityFilter = data.facilityFilter
+          val doctorItems = doctors
+            .filter(doc => facilityFilter.isEmpty || doc.facilityGroupIds.exists(ids => facilityFilter.exists(ids.contains)))
+            .map(_.toIdName)
           physiotherapistPager.restart()
           physiotherapistPager ! Right(new SimpleItemsProvider(doctorItems))
           bot.sendMessage(
@@ -251,6 +269,7 @@ class RehabBook(
 
   private def requestTerm: Step =
     ask { data =>
+      val selectedFacilityIds = data.facilityFilter
       val availableTerms = apiService.getAvailableRehabTerms(
         userId.accountId,
         data.cityId.id,
@@ -261,9 +280,9 @@ class RehabBook(
         data.dateTo,
         data.timeFrom,
         data.timeTo,
-        Option(data.facilityId).flatMap(f => f.optionalId),
+        data.singleFacilityId,
         Option(data.physiotherapistId).flatMap(d => d.optionalId)
-      )
+      ).map(filterSelectedFacilities(_, selectedFacilityIds))
       termsPager.restart()
       termsPager ! availableTerms.map(new SimpleItemsProvider(_))
     } onReply {
@@ -320,7 +339,7 @@ class RehabBook(
         }
         val newData = data.copy(offset = defaultOffset)
         if (askOffset) goto(askMonitoringOffsetOption).using(newData)
-        else goto(askMonitoringAutobookOption).using(newData)
+        else goto(askMonitoringExclusionsOption).using(newData)
     }
 
   private def askMonitoringOffsetOption: Step =
@@ -332,9 +351,60 @@ class RehabBook(
       )
     } onReply {
       case Msg(TextCommand(IntString(offset)), data: RehabBookingData) =>
-        goto(askMonitoringAutobookOption).using(data.copy(offset = offset))
+        goto(askMonitoringExclusionsOption).using(data.copy(offset = offset))
+      case Msg(CallbackCommand(BooleanString(false)), _) =>
+        goto(askMonitoringExclusionsOption)
+    }
+
+  private def askMonitoringExclusionsOption: Step =
+    ask { _ =>
+      bot.sendMessage(
+        userId.source,
+        lang.addMonitoringExclusions,
+        inlineKeyboard = createInlineKeyboard(Seq(Button(lang.no, Tags.No), Button(lang.yes, Tags.Yes)))
+      )
+    } onReply {
+      case Msg(CallbackCommand(BooleanString(true)), _) =>
+        goto(askExcludedWeekdays)
       case Msg(CallbackCommand(BooleanString(false)), _) =>
         goto(askMonitoringAutobookOption)
+    }
+
+  private def askExcludedWeekdays: Step =
+    ask { data =>
+      bot.sendMessage(
+        userId.source,
+        lang.chooseExcludedWeekdays(data.excludedWeekdays),
+        inlineKeyboard = weekdayKeyboard(data.excludedWeekdays)
+      )
+    } onReply {
+      case Msg(CallbackCommand(Tags.Done), _) =>
+        goto(askExcludedDates)
+      case Msg(CallbackCommand(WeekdayTag(dayOfWeek)), data: RehabBookingData) =>
+        val weekdays =
+          if (data.excludedWeekdays.contains(dayOfWeek)) data.excludedWeekdays - dayOfWeek
+          else data.excludedWeekdays + dayOfWeek
+        goto(askExcludedWeekdays).using(data.copy(excludedWeekdays = weekdays))
+    }
+
+  private def askExcludedDates: Step =
+    ask { _ =>
+      bot.sendMessage(
+        userId.source,
+        lang.pleaseEnterExcludedDates,
+        inlineKeyboard = createInlineKeyboard(Seq(Button(lang.no, Tags.No)))
+      )
+    } onReply {
+      case Msg(CallbackCommand(BooleanString(false)), _) =>
+        goto(askMonitoringAutobookOption)
+      case Msg(TextCommand(text), data: RehabBookingData) =>
+        parseExcludedDates(text, data.dateFrom.toLocalDate) match {
+          case Left(error) =>
+            bot.sendMessage(userId.source, lang.unableToParseExcludedDates(error))
+            stay()
+          case Right(dates) =>
+            goto(askMonitoringAutobookOption).using(data.copy(excludedDates = dates.toSet))
+        }
     }
 
   private def askMonitoringAutobookOption: Step =
@@ -435,12 +505,79 @@ class RehabBook(
         end()
     }
 
+  private def staticData(staticDataConfig: => StaticDataConfig)(
+    functions: RehabBookingData => Step => MessageProcessorFn
+  )(requestNext: Step)(implicit functionName: sourcecode.Name): Step = {
+    ask { _ =>
+      staticData.restart()
+      staticData ! staticDataConfig
+    } onReply { case msg @ Msg(_, data: RehabBookingData) =>
+      val fn = functions(data)(requestNext)
+      fn(msg)
+    }
+  }
+
+  private def staticOptions[T <: Identified](
+    staticOptions: => Either[Throwable, List[T]],
+    applyId: IdName => RehabBookingData
+  ): Step => MessageProcessorFn = { nextStep =>
+    {
+      case Msg(cmd: Command, _) =>
+        staticData ! cmd
+        stay()
+      case Msg(LatestOptions, _) =>
+        staticData ! LatestOptions(Nil)
+        stay()
+      case Msg(FindOptions(searchText), _) =>
+        staticData ! FoundOptions(staticOptions.map(_.filter(_.name.toLowerCase.contains(searchText))))
+        stay()
+      case Msg(id: IdName, _) =>
+        goto(nextStep).using(applyId(id))
+    }
+  }
+
+  private def weekdayKeyboard(excludedWeekdays: Set[DayOfWeek]) = {
+    val weekdays = DayOfWeek.values.toSeq
+    val buttons = weekdays.map { day =>
+      val label = s"${if (excludedWeekdays.contains(day)) "✅ " else ""}${lang.weekdayName(day)}"
+      Button(label, Tags.WeekdayPrefix + day.getValue)
+    }
+    createInlineKeyboard(buttons :+ Button(lang.done, Tags.Done), columns = 2)
+  }
+
+  private def parseExcludedDates(text: String, dateFrom: LocalDate): Either[String, Seq[LocalDate]] = {
+    val parts = text.split("[,;\\s]+").map(_.trim).filter(_.nonEmpty).toSeq
+    val parsed = parts.map(parseExcludedDate(_, dateFrom))
+    parsed.collectFirst { case Left(value) => value } match {
+      case Some(error) => Left(error)
+      case None        => Right(parsed.collect { case Right(date) => date })
+    }
+  }
+
+  private def parseExcludedDate(text: String, dateFrom: LocalDate): Either[String, LocalDate] = {
+    val fullDate = Try(LocalDate.parse(text)).toOption
+    val dayMonth = Try {
+      val parsed = MonthDay.parse(text, DateTimeFormatter.ofPattern("dd-MM"))
+      val candidate = parsed.atYear(dateFrom.getYear)
+      if (candidate.isBefore(dateFrom)) candidate.plusYears(1) else candidate
+    }.toOption
+
+    fullDate.orElse(dayMonth).toRight(text)
+  }
+
+  private def filterSelectedFacilities(terms: List[TermExt], facilityIds: Seq[Long]): List[TermExt] =
+    if (facilityIds.size <= 1) terms
+    else terms.filter(term => facilityIds.contains(term.term.clinicGroupId))
+
+  private def rehabCityConfig = StaticDataConfig(lang.city, "wro", "Wrocław", isAnyAllowed = false)
+
+  private def rehabFacilityConfig = StaticDataConfig(lang.clinic, "swob", "Swobodna 1", isAnyAllowed = true)
+
   beforeDestroy {
     datePicker.destroy()
     timePicker.destroy()
     referralPager.destroy()
-    locationPager.destroy()
-    facilityPager.destroy()
+    staticData.destroy()
     physiotherapistPager.destroy()
     termsPager.destroy()
   }
@@ -458,6 +595,7 @@ object RehabBook {
     serviceVariantName: String = "",
     cityId: IdName = null,
     facilityId: IdName = null,
+    facilityIds: Seq[IdName] = Seq(),
     physiotherapistId: IdName = null,
     rehabFacilities: Option[RehabFacilitiesResponse] = None,
     dateFrom: LocalDateTime = LocalDateTime.now(),
@@ -470,8 +608,36 @@ object RehabBook {
     remainingProcedures: Int = 0,
     offset: Int = 0,
     autobook: Boolean = false,
-    rebookIfExists: Boolean = false
-  )
+    rebookIfExists: Boolean = false,
+    excludedWeekdays: Set[DayOfWeek] = Set.empty,
+    excludedDates: Set[LocalDate] = Set.empty
+  ) {
+    def selectedFacilities: Seq[IdName] = {
+      if (facilityIds.nonEmpty) facilityIds
+      else Option(facilityId).toSeq
+    }
+
+    def facilityOptions: Seq[Option[Long]] = selectedFacilities.map(_.optionalId) match {
+      case Nil => Seq(None)
+      case xs  => xs
+    }
+
+    def facilityFilter: Seq[Long] = facilityOptions.flatten.distinct
+
+    def singleFacilityId: Option[Long] = {
+      val selected = facilityOptions.distinct
+      if (selected.size == 1) selected.head else None
+    }
+
+    def hasAnyFacility: Boolean = facilityOptions.exists(_.isEmpty)
+
+    def withFacility(facility: IdName): RehabBookingData = {
+      val updatedFacilities =
+        if (facility.optionalId.isEmpty) Seq(facility)
+        else (selectedFacilities.filter(_.optionalId.nonEmpty) :+ facility).distinctBy(_.id)
+      copy(facilityId = updatedFacilities.head, facilityIds = updatedFacilities)
+    }
+  }
 
   object Tags {
     val Cancel = "cancel"
@@ -484,6 +650,19 @@ object RehabBook {
     val BookByApplication = "true"
     val Yes = "true"
     val No = "false"
+    val AddAnotherFacility = "add_another_facility"
+    val Continue = "continue"
+    val Done = "done"
+    val WeekdayPrefix = "weekday_"
+  }
+
+  object WeekdayTag {
+    def unapply(tag: String): Option[DayOfWeek] =
+      tag.stripPrefix(Tags.WeekdayPrefix) match {
+        case value if tag.startsWith(Tags.WeekdayPrefix) =>
+          Try(DayOfWeek.of(value.toInt)).toOption
+        case _ => None
+      }
   }
 }
 

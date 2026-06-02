@@ -101,6 +101,12 @@ object Pl extends Lang {
        |
        |Czy chcesz dodać kolejną klinikę?""".stripMargin
 
+  override def selectedRehabFacilities(data: RehabBookingData): String =
+    s"""<b>➡</b> Wybrane placówki rehabilitacyjne:
+       |<b>${data.selectedFacilities.map(_.name).mkString(", ")}</b>
+       |
+       |Czy chcesz dodać kolejną placówkę?""".stripMargin
+
   override def addAnotherClinic: String = "➕ Dodaj kolejną"
 
   override def continueBooking: String = "Dalej"
@@ -464,7 +470,7 @@ object Pl extends Lang {
     s"""🏥 <b>Rezerwacja rehabilitacji</b>
        |Usługa: ${data.serviceVariantName}
        |Miasto: ${data.cityId.name}
-       |Placówka: ${if (data.facilityId != null) data.facilityId.name else "Jakikolwiek"}
+       |Placówka: ${if (data.selectedFacilities.nonEmpty) data.selectedFacilities.map(_.name).mkString(", ") else "Jakakolwiek"}
        |Fizjoterapeuta: ${if (data.physiotherapistId != null) data.physiotherapistId.name else "Jakikolwiek"}
        |Data: ${formatDate(data.dateFrom, locale)} — ${formatDate(data.dateTo, locale)}
        |Godziny: ${formatTime(data.timeFrom)} — ${formatTime(data.timeTo)}

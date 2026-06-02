@@ -87,6 +87,8 @@ trait Lang {
 
   def selectedClinics(bookingData: BookingData): String
 
+  def selectedRehabFacilities(data: RehabBookingData): String
+
   def addAnotherClinic: String
 
   def continueBooking: String

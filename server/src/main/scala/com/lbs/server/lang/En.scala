@@ -99,6 +99,12 @@ object En extends Lang {
        |
        |Do you want to add another clinic?""".stripMargin
 
+  override def selectedRehabFacilities(data: RehabBookingData): String =
+    s"""<b>➡</b> Selected rehabilitation facilities:
+       |<b>${data.selectedFacilities.map(_.name).mkString(", ")}</b>
+       |
+       |Do you want to add another facility?""".stripMargin
+
   override def addAnotherClinic: String = "➕ Add another"
 
   override def continueBooking: String = "Continue"
@@ -462,7 +468,7 @@ object En extends Lang {
     s"""🏥 <b>Rehabilitation booking</b>
        |Service: ${data.serviceVariantName}
        |City: ${data.cityId.name}
-       |Facility: ${if (data.facilityId != null) data.facilityId.name else "Any"}
+       |Facility: ${if (data.selectedFacilities.nonEmpty) data.selectedFacilities.map(_.name).mkString(", ") else "Any"}
        |Physiotherapist: ${if (data.physiotherapistId != null) data.physiotherapistId.name else "Any"}
        |Date: ${formatDate(data.dateFrom, locale)} — ${formatDate(data.dateTo, locale)}
        |Time: ${formatTime(data.timeFrom)} — ${formatTime(data.timeTo)}
