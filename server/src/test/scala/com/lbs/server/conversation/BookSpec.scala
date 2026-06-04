@@ -2,18 +2,20 @@ package com.lbs.server.conversation
 
 import com.lbs.api.json.model.*
 import com.lbs.bot.Bot
-import com.lbs.bot.model.{Command, Message, MessageSource, TelegramMessageSourceSystem}
+import com.lbs.bot.model.{Command, InlineKeyboard, Message, MessageSource, TelegramMessageSourceSystem}
+import com.lbs.server.conversation.DatePicker.DateRange
 import com.lbs.server.conversation.Book.Tags
 import com.lbs.server.conversation.Login.UserId
 import com.lbs.server.conversation.Pager.NoItemsFound
 import com.lbs.server.conversation.base.ConversationTestProbe
 import com.lbs.server.lang.{En, Localization}
-import com.lbs.server.repository.model.Settings
+import com.lbs.server.repository.model.{Monitoring, Settings}
 import com.lbs.server.service.{ApiService, DataService, MonitoringService}
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.*
 import org.mockito.Mockito.*
 
-import java.time.{LocalDateTime, LocalTime}
+import java.time.{DayOfWeek, LocalDate, LocalDateTime, LocalTime}
 
 class BookSpec extends AkkaTestKit {
 
@@ -53,10 +55,21 @@ class BookSpec extends AkkaTestKit {
   private def callbackCmd(tag: String) =
     Command(source, Message("1", Some(tag)), Some(tag))
 
-  private def selectStaticData(book: Book): Unit = {
+  private def awaitClinicContinuationPrompt(bot: Bot, selectedClinic: String): Unit =
+    awaitAssert(
+      verify(bot, atLeastOnce()).sendMessage(
+        any[MessageSource](),
+        contains(selectedClinic),
+        any[Option[InlineKeyboard]]()
+      )
+    )
+
+  private def selectStaticData(book: Book, bot: Bot): Unit = {
     book ! IdName(1L, "Wroclaw")
     book ! IdName(100L, "GP Consultation")
     book ! IdName(10L, "Swobodna Clinic")
+    awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
+    book ! callbackCmd(Tags.Continue)
     book ! IdName(50L, "Dr Smith")
   }
 
@@ -132,10 +145,11 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService)
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -149,10 +163,11 @@ class BookSpec extends AkkaTestKit {
         val sp = ConversationTestProbe[StaticData]()
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val dataService = makeDataService
+        val bot         = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
-        val book = makeBook(dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.ModifyDate)
         val base = LocalDateTime.now().plusDays(3)
@@ -163,6 +178,57 @@ class BookSpec extends AkkaTestKit {
         succeed
       }
 
+      "accept a date range from date picker and skip requestDateTo" in {
+        val dp = ConversationTestProbe[DatePicker]()
+        val tp = ConversationTestProbe[TimePicker]()
+        val sp = ConversationTestProbe[StaticData]()
+        val pp = ConversationTestProbe[Pager[TermExt]]()
+        val apiService  = makeApiService
+        val dataService = makeDataService
+        val bot         = makeBot
+        stubBookingFlow(apiService, dataService)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val from = LocalDateTime.now().plusDays(1)
+        val to = from.plusDays(7)
+        book.start()
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(1L, "Wroclaw")
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(100L, "GP Consultation")
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(10L, "Swobodna Clinic")
+        awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
+        book ! callbackCmd(Tags.Continue)
+        sp.expectMsgType[StaticData.StaticDataConfig]
+        book ! IdName(50L, "Dr Smith")
+        dp.expectMsg(DatePicker.DateFromMode)
+        dp.expectMsgType[LocalDateTime]
+        book ! DateRange(from, to)
+        tp.fishForMessage() {
+          case TimePicker.TimeFromMode => true
+          case _                       => false
+        }
+        tp.fishForMessage() {
+          case _: LocalTime => true
+          case _            => false
+        }
+        book ! LocalTime.of(8, 0)
+        tp.fishForMessage() {
+          case TimePicker.TimeToMode => true
+          case _                     => false
+        }
+        tp.fishForMessage() {
+          case _: LocalTime => true
+          case _            => false
+        }
+        book ! LocalTime.of(20, 0)
+        awaitAssert(verify(dataService, atLeastOnce()).storeAppointment(any(), any()))
+        book ! callbackCmd(Tags.FindTerms)
+        awaitAssert(verify(apiService, atLeastOnce()).getAvailableTerms(
+          anyLong(), anyLong(), any(), anyLong(), any(), any(), any(), any(), any(), anyLong()
+        ))
+      }
+
       "delete temporary reservation when Cancel is clicked" in {
         val dp = ConversationTestProbe[DatePicker]()
         val tp = ConversationTestProbe[TimePicker]()
@@ -170,12 +236,13 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService)
         when(apiService.deleteTemporaryReservation(anyLong(), any(), anyLong()))
           .thenReturn(Right(()))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -194,17 +261,19 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(anyLong())).thenReturn(None)
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
+        book ! callbackCmd(Tags.No) // no exclusions
         book ! callbackCmd(Tags.BookManually)
         awaitAssert(verify(monitoringService).createMonitoring(any()))
       }
@@ -216,12 +285,13 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(anyLong())).thenReturn(None)
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
@@ -244,13 +314,14 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService,
           lockResponse = sampleLockResponse(changeTermAvailable = true))
         when(apiService.reservationChangeTerm(anyLong(), any(), any()))
           .thenReturn(Right(sampleConfirmResponse))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -265,11 +336,12 @@ class BookSpec extends AkkaTestKit {
         val pp = ConversationTestProbe[Pager[TermExt]]()
         val apiService  = makeApiService
         val dataService = makeDataService
+        val bot         = makeBot
         stubBookingFlow(apiService, dataService,
           lockResponse = sampleLockResponse(changeTermAvailable = true))
-        val book = makeBook(apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! sampleTerm
@@ -291,19 +363,21 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(userId.userId))
           .thenReturn(Some(Settings(userId.userId, 0, 0, alwaysAskOffset = true)))
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
         book ! Command(source, Message("1", Some("30")), None) // enter offset
+        book ! callbackCmd(Tags.No)                            // no exclusions
         book ! callbackCmd(Tags.BookByApplication)            // autobook = true
         book ! callbackCmd(Tags.Yes)                          // rebookIfExists = true
         awaitAssert(verify(monitoringService).createMonitoring(any()))
@@ -317,21 +391,65 @@ class BookSpec extends AkkaTestKit {
         val apiService        = makeApiService
         val dataService       = makeDataService
         val monitoringService = makeMonitoringService
+        val bot               = makeBot
         doNothing().when(dataService).storeAppointment(any(), any())
         stubGetTerms(apiService, Right(Nil))
         when(dataService.findSettings(userId.userId))
           .thenReturn(Some(Settings(userId.userId, 0, 0, alwaysAskOffset = true)))
-        val book = makeBook(apiService = apiService, dataService = dataService,
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
                             monitoringService = monitoringService)(dp, tp, sp, pp)
         book.start()
-        selectStaticData(book)
+        selectStaticData(book, bot)
         selectDates(book)
         book ! callbackCmd(Tags.FindTerms)
         book ! NoItemsFound
         book ! callbackCmd(Tags.CreateMonitoring)
         book ! callbackCmd(Tags.No)           // skip offset
+        book ! callbackCmd(Tags.No)           // no exclusions
         book ! callbackCmd(Tags.BookManually) // manual booking
         awaitAssert(verify(monitoringService).createMonitoring(any()))
+      }
+
+      "create one monitoring with multiple clinics and exclusions" in {
+        val dp = ConversationTestProbe[DatePicker]()
+        val tp = ConversationTestProbe[TimePicker]()
+        val sp = ConversationTestProbe[StaticData]()
+        val pp = ConversationTestProbe[Pager[TermExt]]()
+        val apiService        = makeApiService
+        val dataService       = makeDataService
+        val monitoringService = makeMonitoringService
+        val bot               = makeBot
+        doNothing().when(dataService).storeAppointment(any(), any())
+        stubGetTerms(apiService, Right(Nil))
+        when(dataService.findSettings(anyLong())).thenReturn(None)
+        val book = makeBook(bot = bot, apiService = apiService, dataService = dataService,
+                            monitoringService = monitoringService)(dp, tp, sp, pp)
+        book.start()
+        book ! IdName(1L, "Wroclaw")
+        book ! IdName(100L, "GP Consultation")
+        book ! IdName(10L, "Swobodna Clinic")
+        awaitClinicContinuationPrompt(bot, "Swobodna Clinic")
+        book ! callbackCmd(Tags.AddAnotherClinic)
+        book ! IdName(11L, "Legnicka Clinic")
+        awaitClinicContinuationPrompt(bot, "Legnicka Clinic")
+        book ! callbackCmd(Tags.Continue)
+        book ! IdName(50L, "Dr Smith")
+        selectDates(book)
+        book ! callbackCmd(Tags.FindTerms)
+        book ! NoItemsFound
+        book ! callbackCmd(Tags.CreateMonitoring)
+        book ! callbackCmd(Tags.Yes) // add exclusions
+        book ! callbackCmd(Tags.WeekdayPrefix + DayOfWeek.TUESDAY.getValue)
+        book ! callbackCmd(Tags.Done)
+        book ! Command(source, Message("1", Some("2026-06-10")), None)
+        book ! callbackCmd(Tags.BookManually)
+
+        val captor = ArgumentCaptor.forClass(classOf[Monitoring])
+        awaitAssert(verify(monitoringService).createMonitoring(captor.capture()))
+        val monitoring = captor.getValue
+        assert(monitoring.clinicOptions == Seq(Some(10L), Some(11L)))
+        assert(monitoring.excludedWeekdaysSet == Set(DayOfWeek.TUESDAY))
+        assert(monitoring.excludedDatesSet == Set(LocalDate.parse("2026-06-10")))
       }
     }
   }
