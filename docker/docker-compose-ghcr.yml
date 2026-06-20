@@ -1,0 +1,46 @@
+version: '3.4'
+services:
+  luxmedbookingservice:
+    container_name: luxmed-bot
+    image: ghcr.io/piteriuz/luxmed-bot:latest
+    env_file: secrets.env
+    environment:
+      DB_HOST: "database"
+      DB_PORT: 5432
+      SPRING_DATASOURCE_USERNAME: "lbs"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-change-me-database-password}"
+    volumes:
+      - lbs:/lbs
+    depends_on:
+      - database
+    networks:
+      luxmed-bot:
+        aliases:
+          - luxmed-bot
+    restart: unless-stopped
+
+  database:
+    container_name: luxmed-bot-database
+    image: postgres:10.6
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=lbs
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-database-password}
+      - POSTGRES_DB=lbs
+      - TZ=Europe/Warsaw
+    networks:
+      luxmed-bot:
+        aliases:
+          - database
+    restart: unless-stopped
+
+volumes:
+  postgres:
+    name: postgres
+  lbs:
+    name: lbs
+
+networks:
+  luxmed-bot:
+    name: luxmed-bot
